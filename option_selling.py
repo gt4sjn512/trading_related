@@ -3,25 +3,32 @@ import pandas_datareader as pdr
 import matplotlib.pyplot as plt
 import numpy as np
 
-tickers = open('./sp500_list').readlines()
-tickers = [each.strip().replace('.', '') for each in tickers]
-# tickers = ['BRK-B','BF-B']
+start_date = '2001-01-01'
+end_date = '2020-07-01'
 
-start = '2001-01-01'
-end = '2020-07-01'
+''' Not a single exception handler. Just send it'''
+
 if False:
+    tickers = open('./sp500_list').readlines()
+    tickers = [each.strip().replace('.', '') for each in tickers]
+    # tickers = ['BRK-B','BF-B']
     for each_ticker in tickers:
         try:
-            pdr.get_data_yahoo(each_ticker, start=start, end=end).to_hdf('Sp500.h5', key=each_ticker, mode='a')
+            pdr.get_data_yahoo(each_ticker, start=start_date, end=end_date).to_hdf('Sp500.h5', key=each_ticker, mode='a')
         except:
             print(each_ticker)
             pass
 
-store = pd.HDFStore('Sp500.h5')
+def generate_timeseries(ticker,localdata=True):
 
+    if localdata:
+        store = pd.HDFStore('Sp500.h5')
+        res = store[ticker][['Adj Close']]
+        store.close()
+    else:
+        print('Downloading data from yahoo')
+        res = pdr.get_data_yahoo(ticker, start=start_date, end=end_date)[['Adj Close']]
 
-def generate_timeseries(ticker):
-    res = store[ticker][['Adj Close']]
     res['ret'] = res['Adj Close'].pct_change()
     res['day'] = res.index
     res['day'] = res['day'].apply(lambda x: x.strftime("%A"))
@@ -57,23 +64,36 @@ def get_er_and_es(threshold, ts):
 
 # get_er_and_es(0.1,ts)
 
-def option_selling_ev(premium, threshold, ticker):
+def option_selling_ev(premium, threshold, ticker,report=False):
     ''' The goal is to calculate returns of selling weekly options'''
-    ts = generate_timeseries(ticker)
+    ts = generate_timeseries(ticker,localdata=False)
+    # for max loss of option selling
+    hero_move = max(ts)
+    zero_move = min(ts)
+
+    ''' Call Option Selling'''
     ev_below, ev_above, p_below, p_above = get_er_and_es(threshold, ts)
     sell_call_ev = premium - max(ev_above - threshold, 0) * p_above
-
+    wtf_call_v = premium - max(hero_move - threshold, 0)
+    if report:
+        print("Call Option Selling EV is: ",round(sell_call_ev*52*100,2),'%')
+        print("Net Option premium income per year is: ",round(premium*52*100,2),'%')
+        print("There is ",round(p_above*100.0,0), "% probability that return will be higher than call threshold.")
+        print("Be careful, worst case is ", round(wtf_call_v*100.0, 0), '%')
+    ''' Put Option Selling'''
     ev_below, ev_above, p_below, p_above = get_er_and_es(-threshold, ts)
     sell_put_ev = premium - max(-ev_below - threshold, 0) * p_below
+    wtf_put_v = premium - max(-zero_move - threshold, 0)
+    if report:
+        print("Put Option Selling EV is: ",round(sell_put_ev*52*100,2),'%')
+        print("Net Option premium income per year is: ",round(premium*52*100,2),'%')
+        print("There is ",round(p_below*100.0,0), "% probability that return will be lower than put threshold.")
+        print("Be careful, worst case is ", round(wtf_put_v*100.0, 0), '%')
 
-    '''  
-    print("Option Selling EV: Annualized return is: ",round(ev*52*100,2),'%')
-    print("Net Option premium income per year is: ",round(premium*52*100,2),'%')
-    print("There is ",round(pr,2), " probability that return will be lower than threshold.")
-    print("Expected shortfall is ",round(es*52*100,2),'%')
-    '''
+
     return sell_call_ev, sell_put_ev
 
+''' quick calc'''
 
 price = 202.8
 strike = 212.5
@@ -81,7 +101,5 @@ option_premium = 2.37
 threshold = strike / price - 1
 premium = option_premium / price
 
-sell_call_ev, sell_put_ev = option_selling_ev(premium=premium, threshold=threshold, ticker='MSFT')
+sell_call_ev, sell_put_ev = option_selling_ev(premium=premium, threshold=threshold, ticker='MSFT',report=True)
 
-print(sell_call_ev)
-print(sell_put_ev)
